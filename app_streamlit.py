@@ -300,6 +300,12 @@ with st.sidebar:
     top_k = st.slider("Resultados vectoriales (k)", 1, 8, 5)
     sim_threshold = st.slider("Umbral de similitud (vectorial)", 0.10, 0.60, 0.30, 0.05)
     st.caption(f"DB: `{DB_PATH}` · Colección: `{COLLECTION}` · Registros: {col.count()}")
+    if st.button("🔄 Reindexar (reconstruir Chroma)"):
+        from cargar_datos import build_index
+        st.info("Reconstruyendo índice…")
+        build_index(insumo_dir="insumo", db_path=DB_PATH, collection=COLLECTION, force_drop=True)
+        st.success("Índice reconstruido.")
+        st.rerun()
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -405,6 +411,7 @@ if q:
             st.markdown("No encontré contexto suficientemente parecido en la base. ¿Puedes dar una referencia o más detalles?")
 
     st.session_state.messages.append({"role": "assistant", "content": "(ver arriba)"})
+
 
 
 
