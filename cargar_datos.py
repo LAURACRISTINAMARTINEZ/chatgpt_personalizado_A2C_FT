@@ -153,19 +153,28 @@ def split_aliases(alt_raw: str) -> list[str]:
 
 def build_index(insumo_dir=INSUMO_DIR, db_path=DB_PATH, collection=COLLECTION, force_drop: bool=False) -> int:
     """
-    Reconstruye/actualiza el índice Chroma leyendo los archivos de `insumo_dir`.
-    Devuelve cuántas filas nuevas añadió.
+    Construye/actualiza el índice Chroma leyendo los archivos de `insumo/`.
+    Devuelve cuántas filas nuevas añadió. Si `force_drop=True`, borra y rehace.
+    Usa los mismos helpers y el cliente OpenAI/chroma definidos arriba.
     """
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("Falta OPENAI_API_KEY en el entorno.")
 
-    ch = chromadb.PersistentClient(path=db_path)
-    _col = ch.get_or_create_collection(name=collection, metadata={"hnsw:space": "cosine"})
+    # Cliente/colección (por si se llama desde la app)
+    ch_local = chromadb.PersistentClient(path=db_path)
+    col_local = ch_local.get_or_create_collection(
+        name=collection,
+        metadata={"hnsw:space": "cosine"}
+    )
     if force_drop:
         try:
-            _col.delete(where={})
+            col_local.delete(where={})
         except Exception:
             pass
+
+    if not os.path.isdir(insumo_dir):
+        print(f"⚠️ No existe la carpeta '{insumo_dir}/'.")
+        return 0
 
     files = [
         os.path.join(insumo_dir, f)
@@ -176,8 +185,6 @@ def build_index(insumo_dir=INSUMO_DIR, db_path=DB_PATH, collection=COLLECTION, f
     if not files:
         print(f"⚠️ No hay archivos tabulares en '{insumo_dir}/'.")
         return 0
-
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=60, max_retries=5)
 
     total_added = 0
     for path in files:
@@ -217,13 +224,13 @@ def build_index(insumo_dir=INSUMO_DIR, db_path=DB_PATH, collection=COLLECTION, f
                 "inventario": inv,
                 "precio_lista": precio,
                 "alt_raw": alt_raw,
-                "aliases": "|".join(aliases),  # serializado a string
+                "aliases": aliases,  # clean_meta la serializa a string
             }
             docs.append(to_doc(row))
             ids.append(id_for(ref, int(i), path))
             metas.append(clean_meta(meta_raw))
 
-        keep_idx = mask_missing(_col, ids)
+        keep_idx = mask_missing(col_local, ids)
         if not keep_idx:
             print(f"✅ {os.path.basename(path)} ya estaba indexado.")
             continue
@@ -233,16 +240,17 @@ def build_index(insumo_dir=INSUMO_DIR, db_path=DB_PATH, collection=COLLECTION, f
             idxs = keep_idx[s:s+BATCH_SIZE]
             resp = client.embeddings.create(model=EMBED_MODEL, input=[docs[i] for i in idxs])
             embs = [d.embedding for d in resp.data]
-            _col.add(
+            col_local.add(
                 ids=[ids[i] for i in idxs],
                 documents=[docs[i] for i in idxs],
                 embeddings=embs,
-                metadatas=[metas[i] for i in idxs]
+                metadatas=[metas[i] for i in idxs],
             )
             total_added += len(idxs)
 
     print(f"✅ Ingesta completa. Filas nuevas añadidas: {total_added}")
     return total_added
+
 
 
 # =========================
@@ -330,5 +338,6 @@ if __name__ == "__main__":
             total_added += len(batch_ids)
 
     print(f"✅ Ingesta completa. Filas nuevas añadidas: {total_added}")
+
 
 
