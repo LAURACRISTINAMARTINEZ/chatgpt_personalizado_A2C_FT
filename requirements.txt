@@ -4,3 +4,6 @@ chromadb
 pandas
 openpyxl
 tqdm
+pysqlite3-binary
+
+
