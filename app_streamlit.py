@@ -40,17 +40,17 @@ SYSTEM_PROMPT = (
 )
 
 # ===== OpenAI =====
-api_key = os.getenv("OPENAI_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+# Cargar desde Secrets si no existe en env (para Streamlit Cloud)
+if not os.getenv("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = st.secrets.get("OPENAI_API_KEY", "")
+
+api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    raise RuntimeError("Falta OPENAI_API_KEY en el entorno.")
+    st.error("Falta OPENAI_API_KEY. Ve a Settings → Secrets en Streamlit Cloud y agrégala.")
+    st.stop()
+
 client = OpenAI(api_key=api_key)
 
-# ===== Chroma (cosine) =====
-chroma = chromadb.PersistentClient(path=DB_PATH)
-col = chroma.get_or_create_collection(
-    name=COLLECTION,
-    metadata={"hnsw:space": "cosine"}  # 👈 importante
-)
 
 # =====================================================
 # Índice de referencias + normalización (cacheado)
@@ -393,4 +393,5 @@ if q:
             st.markdown("No encontré contexto suficientemente parecido en la base. ¿Puedes dar una referencia o más detalles?")
 
     st.session_state.messages.append({"role": "assistant", "content": "(ver arriba)"})
+
 
