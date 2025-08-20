@@ -1,0 +1,6 @@
+streamlit
+openai>=1.30.0
+chromadb
+pandas
+openpyxl
+tqdm
