@@ -26,7 +26,7 @@ COLLECTION  = "insumo"     # <-- usa el MISMO nombre en tu app_streamlit.py
 INSUMO_DIR  = "insumo"     # carpeta donde pones tus .xlsx/.xls/.csv/.txt
 
 # API key (no la hardcodees)
-api_key = os.getenv("OPENAI_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("Falta OPENAI_API_KEY en el entorno.")
 client = OpenAI(api_key=api_key, timeout=60, max_retries=5)
@@ -151,6 +151,100 @@ def split_aliases(alt_raw: str) -> list[str]:
             out.append(p)
     return sorted(set(out))
 
+def build_index(insumo_dir=INSUMO_DIR, db_path=DB_PATH, collection=COLLECTION, force_drop: bool=False) -> int:
+    """
+    Reconstruye/actualiza el índice Chroma leyendo los archivos de `insumo_dir`.
+    Devuelve cuántas filas nuevas añadió.
+    """
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("Falta OPENAI_API_KEY en el entorno.")
+
+    ch = chromadb.PersistentClient(path=db_path)
+    _col = ch.get_or_create_collection(name=collection, metadata={"hnsw:space": "cosine"})
+    if force_drop:
+        try:
+            _col.delete(where={})
+        except Exception:
+            pass
+
+    files = [
+        os.path.join(insumo_dir, f)
+        for f in os.listdir(insumo_dir)
+        if os.path.isfile(os.path.join(insumo_dir, f))
+        and f.lower().endswith((".xlsx", ".xls", ".csv", ".txt"))
+    ]
+    if not files:
+        print(f"⚠️ No hay archivos tabulares en '{insumo_dir}/'.")
+        return 0
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=60, max_retries=5)
+
+    total_added = 0
+    for path in files:
+        df = read_table(path)
+        if df.empty:
+            print(f"⚠️ Vacío: {path}")
+            continue
+
+        df.columns = [c.strip().upper() for c in df.columns]
+        docs, ids, metas = [], [], []
+
+        for i, row in df.iterrows():
+            ref_raw = row.get("REFERENCIA","")
+            ref     = (extract_ref(ref_raw) or "").upper()
+            alt_raw = norm(row.get("REFERENCIAS ALTERNAS","")).upper()
+            aliases = split_aliases(alt_raw)
+
+            nombre = norm(row.get("NOMBRE",""))
+            desc   = norm(row.get("DESCRIPCION",""))
+            marca  = norm(row.get("MARCA",""))
+            linea  = norm(row.get("LINEA",""))
+            subl   = norm(row.get("SUB-LINEA",""))
+            clas   = norm(row.get("CLASIFICACION",""))
+            inv    = norm(row.get("INVENTARIO","")).replace(".", "").replace(",", ".")
+            precio = norm(row.get("PRECIO LISTA","")).replace(".", "").replace(",", ".")
+
+            meta_raw = {
+                "source": os.path.basename(path),
+                "row": int(i),
+                "ref": ref,
+                "nombre": nombre,
+                "descripcion": desc,
+                "marca": marca,
+                "linea": linea,
+                "sublinea": subl,
+                "clasificacion": clas,
+                "inventario": inv,
+                "precio_lista": precio,
+                "alt_raw": alt_raw,
+                "aliases": "|".join(aliases),  # serializado a string
+            }
+            docs.append(to_doc(row))
+            ids.append(id_for(ref, int(i), path))
+            metas.append(clean_meta(meta_raw))
+
+        keep_idx = mask_missing(_col, ids)
+        if not keep_idx:
+            print(f"✅ {os.path.basename(path)} ya estaba indexado.")
+            continue
+
+        print(f"{os.path.basename(path)}: indexando {len(keep_idx)} filas nuevas…")
+        for s in range(0, len(keep_idx), BATCH_SIZE):
+            idxs = keep_idx[s:s+BATCH_SIZE]
+            resp = client.embeddings.create(model=EMBED_MODEL, input=[docs[i] for i in idxs])
+            embs = [d.embedding for d in resp.data]
+            _col.add(
+                ids=[ids[i] for i in idxs],
+                documents=[docs[i] for i in idxs],
+                embeddings=embs,
+                metadatas=[metas[i] for i in idxs]
+            )
+            total_added += len(idxs)
+
+    print(f"✅ Ingesta completa. Filas nuevas añadidas: {total_added}")
+    return total_added
+
+
 # =========================
 # Ingesta
 # =========================
@@ -236,4 +330,5 @@ if __name__ == "__main__":
             total_added += len(batch_ids)
 
     print(f"✅ Ingesta completa. Filas nuevas añadidas: {total_added}")
+
 
