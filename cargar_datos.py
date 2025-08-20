@@ -2,6 +2,16 @@
 # -*- coding: utf-8 -*-
 import os, re, hashlib
 import pandas as pd
+
+# --- SQLite shim para Streamlit Cloud ---
+try:
+    __import__("pysqlite3")
+    import sys
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except Exception:
+    pass
+# ---------------------------------------
+
 import chromadb
 from tqdm import tqdm
 from openai import OpenAI
@@ -226,3 +236,4 @@ if __name__ == "__main__":
             total_added += len(batch_ids)
 
     print(f"✅ Ingesta completa. Filas nuevas añadidas: {total_added}")
+
