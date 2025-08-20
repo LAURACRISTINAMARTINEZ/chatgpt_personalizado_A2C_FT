@@ -1,6 +1,17 @@
 # app_streamlit.py
-import os, re, streamlit as st, chromadb
+import os, re, streamlit as st
 from openai import OpenAI
+
+# --- SQLite shim para Streamlit Cloud (debe ir ANTES de importar chromadb) ---
+try:
+    __import__("pysqlite3")           # carga sqlite moderno empacado en pysqlite3-binary
+    import sys
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except Exception:
+    pass
+# ------------------------------------------------------------------------------
+
+import chromadb
 
 def _preclean_text(s: str) -> str:
     """
@@ -382,3 +393,4 @@ if q:
             st.markdown("No encontré contexto suficientemente parecido en la base. ¿Puedes dar una referencia o más detalles?")
 
     st.session_state.messages.append({"role": "assistant", "content": "(ver arriba)"})
+
