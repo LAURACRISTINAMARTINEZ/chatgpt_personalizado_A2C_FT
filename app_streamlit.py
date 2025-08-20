@@ -51,6 +51,18 @@ if not api_key:
 
 client = OpenAI(api_key=api_key)
 
+@st.cache_resource(show_spinner=True)
+def ensure_index_and_get_collection():
+    # si no hay base (db/) en la nube, construye a partir de /insumo
+    from cargar_datos import build_index
+    need_build = (not os.path.exists(DB_PATH)) or (not os.listdir(DB_PATH))
+    if need_build:
+        st.info("Construyendo índice inicial desde /insumo…")
+        build_index(insumo_dir="insumo", db_path=DB_PATH, collection=COLLECTION, force_drop=False)
+    ch = chromadb.PersistentClient(path=DB_PATH)
+    return ch.get_or_create_collection(name=COLLECTION, metadata={"hnsw:space": "cosine"})
+
+col = ensure_index_and_get_collection()
 
 # =====================================================
 # Índice de referencias + normalización (cacheado)
@@ -393,5 +405,6 @@ if q:
             st.markdown("No encontré contexto suficientemente parecido en la base. ¿Puedes dar una referencia o más detalles?")
 
     st.session_state.messages.append({"role": "assistant", "content": "(ver arriba)"})
+
 
 
